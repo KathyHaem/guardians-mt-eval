@@ -44,6 +44,7 @@ class SentinelRegressionMetric(RegressionMetricModel):
         sent_to_use (Literal["src", "mt", "ref"]): Which sentence to use in the fake metric. It must be in ["src", "mt",
                                                    "ref"].
         final_activation (str): Feed Forward final activation.
+        target_languages (Optional[List[str]]): List of target languages to be used as special tokens. Defaults to None.
     """
 
     def __init__(
@@ -65,11 +66,17 @@ class SentinelRegressionMetric(RegressionMetricModel):
         activations: str = "Tanh",
         sent_to_use: Literal["src", "mt", "ref"] = "mt",
         final_activation: Optional[str] = None,
+        target_languages: Optional[List[str]] = None,
     ) -> None:
         if sent_to_use not in ["src", "mt", "ref"]:
             raise ValueError(
                 "Input parameter 'sent_to_use' for 'SentinelRegressionMetric' class constructor must be 'src'"
                 ", 'mt', or 'ref'!"
+            )
+        if target_languages and sent_to_use != "src":
+            raise ValueError(
+                "Input parameter 'target_languages' for 'SentinelRegressionMetric' class constructor can only be used"
+                " when 'sent_to_use' is 'src'!"
             )
 
         super().__init__(
@@ -86,8 +93,11 @@ class SentinelRegressionMetric(RegressionMetricModel):
         self.save_hyperparameters()
 
         self.encoder = str2encoder[self.hparams.encoder_model].from_pretrained(
-            self.hparams.pretrained_model, load_pretrained_weights
+            self.hparams.pretrained_model,
+            load_pretrained_weights,
+            self.hpams.target_languages,
         )
+
         if self.hparams.keep_embeddings_frozen:
             self.encoder.freeze_embeddings()
 
@@ -156,7 +166,15 @@ class SentinelRegressionMetric(RegressionMetricModel):
             Model inputs and depending on the 'stage' training labels/targets.
         """
         model_inputs = self.encoder.prepare_sample(
-            [str(dic[self.hparams.sent_to_use]) for dic in sample]
+            [
+                {f"{self.hparams.sent_to_use}": str(dic[self.hparams.sent_to_use])}
+                if self.hparams.target_languages is None
+                else {
+                    f"{self.hparams.sent_to_use}": str(dic[self.hparams.sent_to_use]),
+                    "lp": str(dic["lp"]),
+                }
+                for dic in sample
+            ]
         )
 
         if stage == "predict":
@@ -266,7 +284,10 @@ class SentinelRegressionMetric(RegressionMetricModel):
             List[Dict[str, Union[str, float]]]: List of dictionaries containing training samples.
         """
         return read_csv_data(
-            path, {self.hparams.sent_to_use: "str", "score": "float16"}
+            path,
+            {self.hparams.sent_to_use: "str", "score": "float16"}
+            if self.hparams.target_languages is None
+            else {self.hparams.sent_to_use: "str", "score": "float16", "lp": "str"},
         )
 
     def read_validation_data(self, path: Path) -> List[dict]:
@@ -279,5 +300,8 @@ class SentinelRegressionMetric(RegressionMetricModel):
             List[Dict[str, Union[str, float]]]: List of dictionaries containing validation samples.
         """
         return read_csv_data(
-            path, {self.hparams.sent_to_use: "str", "score": "float16"}
+            path,
+            {self.hparams.sent_to_use: "str", "score": "float16"}
+            if self.hparams.target_languages is None
+            else {self.hparams.sent_to_use: "str", "score": "float16", "lp": "str"},
         )

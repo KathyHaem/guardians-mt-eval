@@ -3,11 +3,14 @@ XLM-RoBERTa Encoder
 ==============
     Pretrained XLM-RoBERTa  encoder from Hugging Face.
 """
-from typing import Dict, List
+import logging
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
 from transformers import XLMRobertaConfig, XLMRobertaModel, XLMRobertaTokenizerFast
+
+logger = logging.getLogger(__name__)
 
 
 class XLMREncoder(nn.Module):
@@ -20,7 +23,10 @@ class XLMREncoder(nn.Module):
     """
 
     def __init__(
-        self, pretrained_model: str, load_pretrained_weights: bool = True
+        self,
+        pretrained_model: str,
+        load_pretrained_weights: bool = True,
+        target_languages: Optional[List[str]] = None,
     ) -> None:
         super().__init__()
         self.tokenizer = XLMRobertaTokenizerFast.from_pretrained(pretrained_model)
@@ -35,25 +41,50 @@ class XLMREncoder(nn.Module):
             )
         self.model.encoder.output_hidden_states = False
 
+        # If target_languages is provided, add them as special tokens.
+        if target_languages:
+            special_tokens_dict = {"additional_special_tokens": target_languages}
+            num_added = self.tokenizer.add_special_tokens(special_tokens_dict)
+            self.model.resize_token_embeddings(len(self.tokenizer))
+            logger.info(f"Added {num_added} target language special tokens.")
+
     @property
     def output_units(self) -> int:
         """Hidden size of the encoder model."""
         return self.model.config.hidden_size
 
-    def prepare_sample(
-        self,
-        sample: List[str],
-    ) -> Dict[str, torch.Tensor]:
-        """Receives a list of strings and applies tokenization and vectorization.
+    def prepare_sample(self, sample: List[Dict[str, str]]) -> Dict[str, torch.Tensor]:
+        """
+        Receives a list of dictionaries (each with keys 'src' and, optionally, 'lp') and applies tokenization.
+        It prepends a target language special token (e.g., "<target:en>") to the source text,
+        based on the target language extracted from the "lp" field (if present).
 
         Args:
-            sample (List[str]): List with text segments to be tokenized and padded.
+            sample (List[Dict[str, str]]): List of dictionaries, each containing a sample to tokenize.
 
         Returns:
-            Dict[str, torch.Tensor]: dict with 'input_ids' and 'attention_mask'
+            Dict[str, torch.Tensor]: Tokenized output (input_ids, attention_mask, etc.).
         """
+        processed_texts = []
+        for item in sample:
+            text = item["src"]
+            if "lp" in item:
+                parts = item["lp"].split("-")
+                assert len(parts) == 2
+                target_lang = parts[1]
+                # Construct the special token for the target language.
+                target_token = f"<target:{target_lang}>"
+                # Security check: ensure that target_token was added as a special token.
+                if target_token not in self.tokenizer.all_special_tokens:
+                    raise ValueError(
+                        f"Target token {target_token} was not added as a special token in the tokenizer."
+                    )
+                # Prepend the target token to the source text.
+                text = f"{target_token} {text}"
+            processed_texts.append(text)
+
         tokenizer_output = self.tokenizer(
-            sample,
+            processed_texts,
             return_tensors="pt",
             padding=True,
             truncation=True,
