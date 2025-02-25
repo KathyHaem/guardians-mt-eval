@@ -93,7 +93,7 @@ class XLMREncoder(nn.Module):
 
     @classmethod
     def from_pretrained(
-        cls, pretrained_model: str, load_pretrained_weights: bool = True
+        cls, pretrained_model: str, load_pretrained_weights: bool = True, target_languages: Optional[List[str]] = None,
     ) -> "XLMREncoder":
         """Function that loads a pretrained encoder from Hugging Face.
 
@@ -105,7 +105,7 @@ class XLMREncoder(nn.Module):
         Returns:
             Encoder: XLMREncoder object.
         """
-        return XLMREncoder(pretrained_model, load_pretrained_weights)
+        return XLMREncoder(pretrained_model, load_pretrained_weights, target_languages)
 
     def freeze_embeddings(self) -> None:
         """Frezees the embedding layer."""

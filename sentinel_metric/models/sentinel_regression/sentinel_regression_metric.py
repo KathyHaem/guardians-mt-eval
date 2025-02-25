@@ -95,7 +95,7 @@ class SentinelRegressionMetric(RegressionMetricModel):
         self.encoder = str2encoder[self.hparams.encoder_model].from_pretrained(
             self.hparams.pretrained_model,
             load_pretrained_weights,
-            self.hpams.target_languages,
+            self.hparams.target_languages,
         )
 
         if self.hparams.keep_embeddings_frozen:
