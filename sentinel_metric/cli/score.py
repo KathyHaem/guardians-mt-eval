@@ -313,7 +313,10 @@ def score_with_metric_model(
     """
 
     def create_input_data_for_metric_model(
-        src_sents: List[str], cand_sents: List[str], ref_sents: List[str]
+        src_sents: List[str],
+        cand_sents: List[str],
+        ref_sents: List[str],
+        lp: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """Create the input data for the metric model.
 
@@ -321,6 +324,7 @@ def score_with_metric_model(
             src_sents (List[str]): Source sentences.
             cand_sents (List[str]): Candidate translation sentences.
             ref_sents (List[str]): Reference translation sentences.
+            lp (Optional[str]): Language pair (necessary if target language special tokens are used). Defaults to None.
 
         Returns:
             List[Dict[str, str]]: Input data for the metric model.
@@ -339,6 +343,8 @@ def score_with_metric_model(
                 data_dict["ref"] = ref_sents[i]
 
             if data_dict:
+                if lp is not None:
+                    data_dict["lp"] = lp
                 input_data.append(data_dict)
 
         return input_data
@@ -462,7 +468,7 @@ def score_with_metric_model(
         max_scores_len = 0
         for sys_name, cand_sents in sys2outputs.items():
             metric_model_input_data = create_input_data_for_metric_model(
-                src_sents, cand_sents, ref_sents
+                src_sents, cand_sents, ref_sents, lp
             )
             sys2scored_data[sys_name] = metric_model_input_data
             metric_model_output = metric_model.predict(
