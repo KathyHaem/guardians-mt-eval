@@ -5,3 +5,5 @@ sentinel-src-da-target-lang	yes	data/metrics_results/metrics_outputs/wmt24/ja-zh
 sentinel-src-mqm-24-target-lang	yes	data/metrics_results/metrics_outputs/wmt24/ja-zh/sentinel-src-mqm-24-target-lang
 sentinel-src-da-lin-target-lang	yes	data/metrics_results/metrics_outputs/wmt24/ja-zh/sentinel-src-da-lin-target-lang
 sentinel-src-mqm-24-lin-target-lang	yes	data/metrics_results/metrics_outputs/wmt24/ja-zh/sentinel-src-mqm-24-lin-target-lang
+sentinel-src-mqm-24-target-lang-more-data	yes	data/metrics_results/metrics_outputs/wmt24/ja-zh/sentinel-src-mqm-24-target-lang-more-data
+sentinel-src-mqm-24-lin-target-lang-more-data	yes	data/metrics_results/metrics_outputs/wmt24/ja-zh/sentinel-src-mqm-24-lin-target-lang-more-data
