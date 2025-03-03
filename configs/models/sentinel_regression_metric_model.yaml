@@ -7,7 +7,7 @@ sentinel_regression_metric:
     batch_size: 8
     shuffle: True
     train_data:
-      - data/mqm/train/2020-23-mqm_more-raters_z-norm.csv
+      - data/mqm/train/2020-23-mqm_z-norm-per-rater.csv
     validation_data:
       - data/mqm/dev/wmt24_ende_mqm.csv
       - data/mqm/dev/wmt24_enes_mqm.csv
