@@ -4,12 +4,19 @@ from argparse import ArgumentParser
 from pathlib import Path
 import pickle
 
-from typing import List, Dict, Union, Optional
+import spacy
+from spacy.tokens import Token, Doc
+
+from wordfreq import word_frequency, zipf_frequency, tokenize
+
+from typing import List, Dict, Union, Optional, Literal
 
 import pandas as pd
 
 import sentinel_metric
 from sentinel_metric.models import RegressionMetricModel
+
+import precomet
 
 import comet
 from comet.models import CometModel
@@ -98,6 +105,24 @@ def read_arguments() -> ArgumentParser:
         default=8,
         type=int,
         help="Batch size to use when running inference with the given metric model. Default: 8.",
+    )
+    parser.add_argument(
+        "--syntactic-model-name",
+        type=str,
+        help="Which spaCy Dependency Parsing model to use for Syntactic Structure Complexity scoring. If passed, the "
+        "above arguments will be ignored.",
+    )
+    parser.add_argument(
+        "--word-frequency",
+        type=str,
+        help="Whether to score source texts with a method based on word frequency. If passed, the above arguments will "
+        "be ignored.",
+    )
+    parser.add_argument(
+        "--word-zipf-frequency",
+        type=str,
+        help="Whether to score source texts with a method based on word zipf frequency. If passed, the above arguments "
+        "will be ignored.",
     )
     parser.add_argument(
         "--testset-name",
@@ -189,6 +214,162 @@ def read_arguments() -> ArgumentParser:
     return parser
 
 
+def compute_token_depth(token: Token) -> int:
+    """
+    Compute the dependency depth of a token: the number of hops from the token to the root.
+
+    Args:
+        token (Token): A spaCy Token.
+
+    Returns:
+        int: The dependency depth of the token.
+    """
+    depth = 0
+    while token.head != token:
+        depth += 1
+        token = token.head
+    return depth
+
+
+def compute_dependency_tree_height(doc: Doc) -> int:
+    """
+    Compute the dependency tree height for a spaCy Doc.
+    The height is defined as the maximum dependency depth among all tokens in the doc.
+
+    Args:
+        doc (Doc): A spaCy Doc.
+
+    Returns:
+        int: The maximum token depth in the doc.
+    """
+    if len(doc) == 0:
+        return 0
+    return max(compute_token_depth(token) for token in doc)
+
+
+def score_with_syntactic_complexity(
+    syntactic_model_name: str,
+    testset_name: str,
+    lp: str,
+    include_human: bool,
+    include_ref_to_use: bool,
+    include_outliers: bool,
+    ref_to_use: str,
+    out_path: Path,
+) -> None:
+    testset = get_wmt_testset(testset_name, lp)
+
+    systems_to_discard = set()
+    if not include_ref_to_use:
+        systems_to_discard.add(ref_to_use)
+    if not include_human:
+        systems_to_discard = systems_to_discard.union(testset.human_sys_names)
+    if not include_outliers:
+        systems_to_discard = systems_to_discard.union(testset.outlier_sys_names)
+
+    sys2outputs = dict()
+    for sys, candidates in testset.sys_outputs.items():
+        if sys in systems_to_discard:
+            continue
+        assert len(candidates) == len(testset.src) == len(testset.all_refs[ref_to_use])
+        assert all(candidate is not None for candidate in candidates)
+        sys2outputs[sys] = candidates
+
+    print("\n")
+    print(f"# MT systems to score in {testset_name} for {lp} lp = {len(sys2outputs)}.")
+    print(f"# input source sentences: {len(testset.src)}.")
+    print("\n")
+
+    sys2seg_scores, sys2score = dict(), dict()
+
+    scores = []
+    nlp = spacy.load(syntactic_model_name)
+    for src in testset.src:
+        doc = nlp(src)
+        height = compute_dependency_tree_height(doc)
+        scores.append(-height)
+    sys_score = [sum(scores) / len(scores)]
+
+    for sys_name, cand_sents in sys2outputs.items():
+        sys2seg_scores[sys_name] = scores
+        sys2score[sys_name] = sys_score
+
+    print("\n")
+    for sys_name, score in sys2score.items():
+        print(f"MT system: {sys_name}\tMetric system score: {round(score[0], 4)}.")
+    print("\n")
+
+    if out_path is not None:
+        with open(out_path / "seg_scores.pickle", "wb") as handle:
+            pickle.dump(sys2seg_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open(out_path / "sys_scores.pickle", "wb") as handle:
+            pickle.dump(sys2score, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def score_with_word_freq(
+    method: Literal["word-zipf-frequency", "word-frequency"],
+    testset_name: str,
+    lp: str,
+    include_human: bool,
+    include_ref_to_use: bool,
+    include_outliers: bool,
+    ref_to_use: str,
+    out_path: Path,
+) -> None:
+    testset = get_wmt_testset(testset_name, lp)
+
+    systems_to_discard = set()
+    if not include_ref_to_use:
+        systems_to_discard.add(ref_to_use)
+    if not include_human:
+        systems_to_discard = systems_to_discard.union(testset.human_sys_names)
+    if not include_outliers:
+        systems_to_discard = systems_to_discard.union(testset.outlier_sys_names)
+
+    sys2outputs = dict()
+    for sys, candidates in testset.sys_outputs.items():
+        if sys in systems_to_discard:
+            continue
+        assert len(candidates) == len(testset.src) == len(testset.all_refs[ref_to_use])
+        assert all(candidate is not None for candidate in candidates)
+        sys2outputs[sys] = candidates
+
+    print("\n")
+    print(f"# MT systems to score in {testset_name} for {lp} lp = {len(sys2outputs)}.")
+    print(f"# input source sentences: {len(testset.src)}.")
+    print("\n")
+
+    sys2seg_scores, sys2score = dict(), dict()
+
+    src_lang = lp.split("-")[0]
+    scoring_funct, scores = (
+        word_frequency if method == "word-frequency" else zipf_frequency,
+        [],
+    )
+
+    for src in testset.src:
+        tokens = tokenize(src, src_lang)
+        scores.append(
+            sum(scoring_funct(token, src_lang) for token in tokens) / len(tokens)
+        )
+    sys_score = [sum(scores) / len(scores)]
+
+    for sys_name, cand_sents in sys2outputs.items():
+        sys2seg_scores[sys_name] = scores
+        sys2score[sys_name] = sys_score
+
+    print("\n")
+    for sys_name, score in sys2score.items():
+        print(f"MT system: {sys_name}\tMetric system score: {round(score[0], 4)}.")
+    print("\n")
+
+    if out_path is not None:
+        with open(out_path / "seg_scores.pickle", "wb") as handle:
+            pickle.dump(sys2seg_scores, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open(out_path / "sys_scores.pickle", "wb") as handle:
+            pickle.dump(sys2score, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
 def score_command() -> None:
     """Command to score with a given metric model."""
     parser = read_arguments()
@@ -216,55 +397,83 @@ def score_command() -> None:
             "If '--csv-data-path' is passed, '--computed-scores-column-name' and '--out-path' must also be passed!"
         )
 
-    if args.comet_metric_model_checkpoint_path is not None:
-        metric_model = comet.load_from_checkpoint(
-            args.comet_metric_model_checkpoint_path, strict=args.strict_load
+    if args.syntactic_model_name is not None:
+        score_with_syntactic_complexity(
+            args.syntactic_model_name,
+            args.testset_name,
+            args.lp,
+            args.include_human,
+            args.include_ref_to_use,
+            args.include_outliers,
+            args.ref_to_use,
+            args.out_path,
         )
-    elif args.comet_metric_model_name is not None:
-        metric_model_path = comet.download_model(args.comet_metric_model_name)
-        metric_model = comet.load_from_checkpoint(
-            metric_model_path, strict=args.strict_load
-        )
-    elif args.sentinel_metric_model_checkpoint_path:
-        metric_model = sentinel_metric.load_from_checkpoint(
-            args.sentinel_metric_model_checkpoint_path,
-            strict=args.strict_load,
-            class_identifier=args.sentinel_metric_model_class_identifier,
+    elif args.word_frequency or args.word_zipf_frequency:
+        score_with_word_freq(
+            "word-zipf-frequency" if args.word_zipf_frequency else "word-frequency",
+            args.testset_name,
+            args.lp,
+            args.include_human,
+            args.include_ref_to_use,
+            args.include_outliers,
+            args.ref_to_use,
+            args.out_path,
         )
     else:
-        if args.sentinel_metric_model_name is None:
-            parser.error("No metric model specified in input!")
+        if args.comet_metric_model_checkpoint_path is not None:
+            metric_model = comet.load_from_checkpoint(
+                args.comet_metric_model_checkpoint_path, strict=args.strict_load
+            )
+        elif args.comet_metric_model_name is not None:
+            if "PreCOMET" in args.comet_metric_model_name:
+                metric_model = precomet.load_from_checkpoint(
+                    precomet.download_model(args.comet_metric_model_name)
+                )
+            else:
+                metric_model_path = comet.download_model(args.comet_metric_model_name)
+                metric_model = comet.load_from_checkpoint(
+                    metric_model_path, strict=args.strict_load
+                )
+        elif args.sentinel_metric_model_checkpoint_path:
+            metric_model = sentinel_metric.load_from_checkpoint(
+                args.sentinel_metric_model_checkpoint_path,
+                strict=args.strict_load,
+                class_identifier=args.sentinel_metric_model_class_identifier,
+            )
+        else:
+            if args.sentinel_metric_model_name is None:
+                parser.error("No metric model specified in input!")
 
-        metric_model_path = sentinel_metric.download_model(
-            args.sentinel_metric_model_name
-        )
-        metric_model = sentinel_metric.load_from_checkpoint(
-            metric_model_path,
-            strict=args.strict_load,
-            class_identifier=args.sentinel_metric_model_class_identifier,
-        )
+            metric_model_path = sentinel_metric.download_model(
+                args.sentinel_metric_model_name
+            )
+            metric_model = sentinel_metric.load_from_checkpoint(
+                metric_model_path,
+                strict=args.strict_load,
+                class_identifier=args.sentinel_metric_model_class_identifier,
+            )
 
-    score_with_metric_model(
-        metric_model,
-        args.gpus,
-        args.batch_size,
-        args.testset_name,
-        args.lp,
-        args.include_human,
-        args.include_ref_to_use,
-        args.include_outliers,
-        args.only_system,
-        args.ref_to_use,
-        args.domain,
-        args.csv_data_path,
-        args.computed_scores_column_name,
-        args.sources,
-        args.translations,
-        args.references,
-        args.out_path,
-        args.to_json,
-        args.metric_name,
-    )
+        score_with_metric_model(
+            metric_model,
+            args.gpus,
+            args.batch_size,
+            args.testset_name,
+            args.lp,
+            args.include_human,
+            args.include_ref_to_use,
+            args.include_outliers,
+            args.only_system,
+            args.ref_to_use,
+            args.domain,
+            args.csv_data_path,
+            args.computed_scores_column_name,
+            args.sources,
+            args.translations,
+            args.references,
+            args.out_path,
+            args.to_json,
+            args.metric_name,
+        )
 
 
 def score_with_metric_model(
