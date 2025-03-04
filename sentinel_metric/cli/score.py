@@ -114,13 +114,13 @@ def read_arguments() -> ArgumentParser:
     )
     parser.add_argument(
         "--word-frequency",
-        type=str,
+        action="store_true",
         help="Whether to score source texts with a method based on word frequency. If passed, the above arguments will "
         "be ignored.",
     )
     parser.add_argument(
         "--word-zipf-frequency",
-        type=str,
+        action="store_true",
         help="Whether to score source texts with a method based on word zipf frequency. If passed, the above arguments "
         "will be ignored.",
     )
