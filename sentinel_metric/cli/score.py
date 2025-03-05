@@ -347,10 +347,11 @@ def score_with_word_freq(
         [],
     )
 
+    eps = 1e-10
     for src in testset.src:
         tokens = tokenize(src, src_lang)
         scores.append(
-            sum(scoring_funct(token, src_lang) for token in tokens) / len(tokens)
+            sum(scoring_funct(token, src_lang) for token in tokens) / (len(tokens) + eps)
         )
     sys_score = [sum(scores) / len(scores)]
 
