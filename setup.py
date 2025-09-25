@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name="sentinel_metric",
@@ -8,7 +8,7 @@ setup(
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/SapienzaNLP/guardians-mt-eval",
-    packages=["sentinel_metric*"],
+    packages=find_packages(include=["sentinel_metric*"]),
     install_requires=[
         "numpy>=1.24.4",
         "pandas>=2.1.3",
