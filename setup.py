@@ -8,7 +8,7 @@ setup(
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/SapienzaNLP/guardians-mt-eval",
-    packages=["sentinel_metric"],
+    packages=["sentinel_metric*"],
     install_requires=[
         "numpy>=1.24.4",
         "pandas>=2.1.3",
